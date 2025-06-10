@@ -19,36 +19,58 @@ CDnmConvX::CDnmConvX(void):omhs(*this),mhs(*this),frs(*this),aks(*this)
 // CDnmConvX::~CDnmConvX(void){
 // }
 
-CDnmConvX&CDnmConvX::operator<<(std::istringstream&ss){ // Qualified istringstream
-	f32 scale(0.01f);							// scale mesh modifier
-	E_flib onDnm(E_flib::NOT); // Qualified E_flib
-	E_flib onPck(E_flib::NOT);
-	E_flib onSurf(E_flib::NOT);
-	E_flib onFace(E_flib::NOT);
-	E_flib isBright(E_flib::NOT);
-	E_flib onSrf(E_flib::NOT);							// inside group data status
-	std::string line_buf;								// temporal line to parse, Qualified string, Renamed line to line_buf
-	std::string current_mtname;								// temporal material name, Qualified string, Renamed mtname to current_mtname
-	std::string current_frname;								// temporal frame name, Qualified string, Renamed frname to current_frname
-	u32 line_idx=0;									// line index, Renamed l to line_idx
-	++line_idx;std::getline(ss,line_buf);						// get DNM or SRF header, Qualified getline
+/**
+ * @brief Overloaded stream extraction operator to parse DNM content from an input string stream.
+ * This is the core parsing logic for the DNM file format, handling various sections like
+ * mesh data (vertices, faces, normals, colors), material definitions, and frame/animation hierarchies.
+ * @param ss Input string stream containing the DNM file data.
+ * @return Reference to this CDnmConvX object, allowing for chained operations.
+ */
+CDnmConvX&CDnmConvX::operator<<(std::istringstream&ss){
+	// ===== Section: Initialization and Header Parsing =====
+	// This section initializes parsing state variables and checks the DNM/SRF file header.
+	float scale(0.01f);							//!< Scale factor to apply to mesh vertices.
+	E_flib onDnm(E_flib::NOT);					//!< Flag indicating if currently parsing a DNM section.
+	E_flib onPck(E_flib::NOT);					//!< Flag indicating if currently parsing a PCK (surface pack) section.
+	E_flib onSurf(E_flib::NOT);					//!< Flag indicating if currently parsing a SURF (mesh) section.
+	E_flib onFace(E_flib::NOT);					//!< Flag indicating if currently parsing face definitions.
+	E_flib isBright(E_flib::NOT);				//!< Flag indicating if the current material should be bright/emissive.
+	E_flib onSrf(E_flib::NOT);					//!< Flag indicating if currently parsing an SRF (frame hierarchy) section.
+	std::string line_buf;						//!< Buffer to hold the currently read line from the input stream.
+	std::string current_mtname;					//!< Stores the name of the current material being processed.
+	std::string current_frname;					//!< Stores the name of the current frame being processed.
+	std::uint32_t line_idx=0;					//!< Index of the current line being parsed, for debugging or error reporting.
+
+	// Read the first line, expecting DNM or SRF header.
+	++line_idx; std::getline(ss,line_buf);
 	if(line_buf=="DYNAMODEL"){
-		++onDnm;
-		++line_idx;std::getline(ss,line_buf);					// get DNM version, Qualified getline
-		if(line_buf.length() < 8 || line_buf[7]!='1')return*this; // Added length check for safety
-	}else if(line_buf=="SURF")
-		++onSurf;
-	else return*this;							// wrong file
-	SMaterial current_material={0,"temp-material" // SMaterial from header, Renamed mt to current_material
-		,{0},1									// diffuse color and Alpha
-		,50*1.28f								// glossiness
-		,{50/255.f,50/255.f,50/255.f}			// specular color
-		,{0}									// emissive color
+		++onDnm; // Set DNM parsing mode.
+		++line_idx; std::getline(ss,line_buf);	// Read the next line for DNM version.
+		// Check if DNM version is supported (expects "VERSION1").
+		if(line_buf.length() < 8 || line_buf.substr(0,8)!="VERSION1"){ // More robust check for "VERSION1"
+			std::cerr << "Warning: Unsupported DNM version or malformed header: " << line_buf << std::endl;
+			return*this; // Early exit if unsupported version.
+		}
+	}else if(line_buf=="SURF"){
+		++onSurf; // Set SURF parsing mode (typically for single, non-animated meshes).
+	}else{
+		std::cerr << "Error: File is not a recognized DNM or SURF file. Header: " << line_buf << std::endl;
+		return*this; // Early exit if not a recognized file type.
+	}
+	// Initialize a default material.
+	SMaterial current_material={0,"temp-material"
+		,{0.8f, 0.8f, 0.8f},1.0f					// Default diffuse gray and Alpha
+		,64.0f								    // Default glossiness (specular power)
+		,{0.2f,0.2f,0.2f}			            // Default specular color
+		,{0.0f,0.0f,0.0f}						// Default emissive color
 	};
-	SMesh current_mesh(*this);								// temp mesh pointer, SMesh from header, Renamed mh to current_mesh
-	while(++line_idx,std::getline(ss,line_buf)){				// inside mesh, Qualified getline
-		UColor15Bit color15bit;								// store 15bit color, UColor15Bit from header, Renamed cl2 to color15bit
-		UColor24Bit color24bit;								// store 24bit color, UColor24Bit from header, Renamed cl4 to color24bit
+	SMesh current_mesh(*this);								// Accumulates data for the current mesh being parsed.
+
+	// ===== Section: Main Mesh Data Parsing Loop =====
+	// This loop processes lines related to mesh geometry and materials.
+	while(++line_idx,std::getline(ss,line_buf)){
+		UColor15Bit color15bit;								// Temporary storage for 15-bit color data.
+		UColor24Bit color24bit;								// Temporary storage for 24/32-bit color data.
 		char first_char_in_line = 0;									// garbage char slot, Renamed t to first_char_in_line, initialized
 		std::string garbage_str;								// garbage float slot, Qualified string, Renamed g to garbage_str
 		u16 temp_int = 0;								// temp int, Renamed i to temp_int, initialized
@@ -60,90 +82,133 @@ CDnmConvX&CDnmConvX::operator<<(std::istringstream&ss){ // Qualified istringstre
 				SFaceIdx face_indices; // SFaceIdx from header, Renamed fc to face_indices
 				while(line_stream>>temp_int)face_indices.vfi.push_back(temp_int);
 				current_mesh.fcs.push_back(face_indices);
-				current_mesh.normal.fcs.push_back(face_indices);	// redundant index
+				current_mesh.normal.fcs.push_back(face_indices);	// Assume normal indices initially match face indices.
 			}else{								// else vertex coords
-				SVertex current_vertex={0,0,0,false}; // SVertex from header, Renamed v to current_vertex
-				line_stream>>first_char_in_line>>current_vertex.x>>current_vertex.y>>current_vertex.z>>first_char_in_line;
-				current_vertex.r=first_char_in_line=='R';						// round, unused data (for smothing group)
+				SVertex current_vertex; // Default constructor initializes to (0,0,0,false).
+				line_stream>>first_char_in_line>>current_vertex.x>>current_vertex.y>>current_vertex.z;
+                // Check for optional 'R' flag (rounded vertex, hint for smooth shading).
+                if (line_stream.peek() != std::char_traits<char>::eof() && !std::isspace(static_cast<unsigned char>(line_stream.peek()))) {
+                    line_stream >> first_char_in_line; // Consume if more data on the line
+                    current_vertex.r = (first_char_in_line == 'R');
+                }
 				current_mesh.vts.push_back(current_vertex*scale);
 			}
 			break;}
 		case'N':{
-			SVertex normal_vertex={0,0,0,false}; // SVertex from header, Renamed v to normal_vertex
-			line_stream>>first_char_in_line>>garbage_str>>garbage_str>>garbage_str>>normal_vertex.x>>normal_vertex.y>>normal_vertex.z;
+			SVertex normal_vertex; // Default constructor.
+			// The DNM "N" line format can be: N GARBAGE GARBAGE GARBAGE Nx Ny Nz
+			// Or sometimes just: N Nx Ny Nz (though less common in older files)
+			// This parsing assumes the longer format with garbage strings.
+			line_stream>>first_char_in_line; // Consume 'N'
+            // Try to read up to 3 garbage strings. If fewer, it's fine.
+            for(int i=0; i<3; ++i) { if(!(line_stream >> garbage_str)) break; }
+            line_stream >> normal_vertex.x >> normal_vertex.y >> normal_vertex.z;
 			current_mesh.normal.vts.push_back(normal_vertex);
 			break;}
-		case'C':{								// color of the face
-			line_stream>>first_char_in_line>>color15bit.u;						// assume unsigned 15bit color
-			if(line_stream>>temp_int){							// true when handle 24bit color
-				color24bit.r=color15bit.u;					// get red
-				color24bit.g=static_cast<std::uint8_t>(temp_int);
-				line_stream>>temp_int;
-				color24bit.b=static_cast<std::uint8_t>(temp_int);
-			}else color24bit=color15bit;
+		// --- Case C: Color data for the current face ---
+		case'C':{
+			line_stream>>first_char_in_line>>color15bit.u; // Always read the first value as 15-bit color.
+			// Check if there's more data on the line, indicating a 24-bit (3-component) color.
+			if(line_stream>>temp_int){
+				color24bit.r = color15bit.u; // The first value read into color15bit.u was actually the R component.
+				color24bit.g = static_cast<std::uint8_t>(temp_int); // The first temp_int is G.
+				if(line_stream>>temp_int) { // Check for B component.
+				    color24bit.b = static_cast<std::uint8_t>(temp_int);
+                } else {
+                    color24bit.b = 0; // Default B if missing (should ideally not happen for valid 24-bit).
+                }
+                color24bit.a = 255; // Default alpha to opaque for 24-bit colors.
+			}else{ // It was only a 15-bit color.
+                color24bit=color15bit; // Convert 15-bit to 24-bit RGBA structure.
+            }
 			break;}
+		// --- Case F: Start of a new Face definition block ---
 		case'F':{
-			++onFace;
+			++onFace; // Set flag indicating subsequent 'V' lines are face indices.
 			break;}
+		// --- Case E: End of Face definition block (EOVF) or End of SURF block (EOVF) ---
 		case'E':{
-			if(onFace-- == E_flib::YES){						// true if end of face, Qualified E_flib
-				current_mtname=color24bit.operator std::string(); // Use string operator for name
-				current_material.d=color24bit;
-				if(isBright-- == E_flib::YES){					// true if emissive light, Qualified E_flib
-					current_material.e=current_material.d;					// update emissive color
-					current_mtname[0]='G';				// glow indicator
-				}else current_material.e= SColor3Float{4/255.f,4/255.f,4/255.f}; // reset emissive color
-				u32 sz=current_mesh.mlist.mtMap.size();	// memo index
-				if(current_material.name!=current_mtname||sz==0){		// true if different material
-					current_material.name=current_mtname;				// update material
-					// current_material.d=color24bit; // d is already set
-					mts<<current_material;					// collect material
-					if (!nstmt) { // If not using nested material definitions, collect for output definition list
-						omts << current_material;
+			if(onFace-- == E_flib::YES){ // End of current face definition block.
+				// --- Material Handling for the completed face ---
+				current_mtname=color24bit.operator std::string(); // Generate material name from its color string.
+				current_material.d=color24bit; // Set diffuse color from the parsed color.
+				if(isBright-- == E_flib::YES){ // If 'B' flag was set for this face.
+					current_material.e=current_material.d; // Emissive color is same as diffuse.
+					if(!current_mtname.empty()) current_mtname[0]='G'; // Prefix name with 'G' to indicate glow/emissive.
+				}else {
+                    current_material.e = SColor3Float{4/255.f,4/255.f,4/255.f}; // Default dim emissive color.
+                }
+
+                bool new_material_entry = true;
+                // Check if a material with this generated name already exists for the current mesh.
+				if(current_mesh.mlist.mtMap.count(current_mtname)){
+                    new_material_entry = false;
+                }
+                current_material.name = current_mtname; // Set the final name for current_material.
+
+				if(new_material_entry){ // If it's a new material (by name) for this mesh.
+					mts<<current_material; // Add to the global collection of parsed materials.
+					if (!nstmt) { // If not using nested material definitions for output...
+						omts << current_material; // ...add to the global output material collection.
 					}
-					current_mesh.mlist.mtMap[current_mtname]=current_material;
+					current_mesh.mlist.mtMap[current_mtname]=current_material; // Add to this mesh's specific material map.
 				}
-				current_mesh.mlist.mtIdx.push_back(current_material.name);	// mat index
-			}else if(onSurf-- == E_flib::YES){					// else end of mesh, Qualified E_flib
-				current_mtname.clear();
+				current_mesh.mlist.mtIdx.push_back(current_material.name); // Assign this material (by name) to the current face.
+			}else if(onSurf-- == E_flib::YES){ // End of current SURF (mesh geometry) block.
+				current_mtname.clear(); // Reset current material name.
 			}
 			break;}
-		case'S':{								// Header or SubHeader
-			if(line_buf=="SURF")++onSurf;
-			else if(line_buf.substr(0,3)=="SRF"){	// end of Pck
-				++onSrf;
-				--onPck;
-				line_stream>>garbage_str>>current_frname;
-				mhs<<current_mesh;						// mesh done
+		// --- Case S: SURF (start of mesh geometry section) or SRF (start of frame hierarchy section) ---
+		case'S':{
+			if(line_buf=="SURF") {
+                ++onSurf; // Entering a mesh geometry section.
+            }
+			else if(line_buf.substr(0,3)=="SRF"){	// Start of Frame/Scene Hierarchy Data.
+				++onSrf; // Set SRF mode.
+				if(onPck == E_flib::YES) --onPck; // If we were in a PCK, it ends here.
+
+                // The current_mesh is now complete. Add it to the collection of parsed meshes.
+                if(!current_mesh.name.empty() || !current_mesh.vts.empty()) {
+				mhs<<current_mesh;
+                }
+				// The SRF line also contains the name of the root frame of this hierarchy.
+				line_stream>>garbage_str>>current_frname; // garbage_str gets "SRF", current_frname gets root frame name (often quoted).
 			}
 			break;}
-		case'P':{								// start of new surface pack
-			if(line_buf.substr(0,3)=="PCK"){
-				++onPck;
-				if(current_mesh.name!="")					// false at first loop
-					mhs<<current_mesh;					// mesh done
-				current_mesh.clear();						// room for the new mesh
-				line_stream>>garbage_str>>garbage_str;						// get name, then ignore extension file
+		// --- Case P: PCK (mesh package; effectively a new mesh definition) ---
+		case'P':{
+			if(line_buf.substr(0,3)=="PCK"){ // Start of a new surface pack.
+				++onPck; // Entering a PCK block.
+				if(!current_mesh.name.empty() || !current_mesh.vts.empty()){ // If there's an existing mesh being built...
+					mhs<<current_mesh;					// ...save it before starting a new one.
+                }
+				current_mesh.clear();						// Reset current_mesh for the new data.
+				line_stream>>garbage_str>>garbage_str;		// First garbage is "PCK", second is the filename (e.g., "meshfile.dnm").
 				if (!garbage_str.empty()) {
-					size_t dot_pos = garbage_str.find_last_of('.');
-					if (dot_pos != std::string::npos) {
-						current_mesh.name = garbage_str.substr(0, dot_pos);
-					} else {
-						current_mesh.name = garbage_str;
-					}
+                    // Extract mesh name from filename, excluding extension, using std::filesystem.
+                    current_mesh.name = std::filesystem::path(garbage_str).stem().string();
 				}
 			}
 			break;}
-		case'B':{								// bright face
-			++isBright;							// memorize to apply glow effect
+		// --- Case B: Bright flag for next face (indicates emissive material) ---
+		case'B':{
+			++isBright;							// Set flag, will be checked when 'E' (End of Face) is processed.
 			break;}
-		default:{
+		default:{ // Unknown line type
+			// Optionally log or handle unknown lines. For now, they are ignored.
 			break;}
 		}
-		if(onSrf == E_flib::YES) // Qualified E_flib
+		if(onSrf == E_flib::YES) // If SRF directive was encountered, break from mesh processing loop.
 			break;
 	}
-	SFrame current_frame(*this);
+    // After loop, if a mesh was being parsed (especially for simple SURF files without SRF section), store it.
+    if ((onDnm == E_flib::YES || onSurf == E_flib::YES) && (onSrf == E_flib::NOT) && (!current_mesh.name.empty() || !current_mesh.vts.empty())) {
+        mhs << current_mesh;
+    }
+
+    // ===== Section: Frame and Animation Data Parsing Loop =====
+    // This loop processes lines related to the scene hierarchy and animations (SRF, FIL, CLA, STA, POS, CNT, REL, CLD, END).
+	SFrame current_frame(*this); // Temporary SFrame object to accumulate current frame data.
 	SAnimationKey& current_anim_key=current_frame.ak;
 	while(++line_idx,std::getline(ss,line_buf)){
 		std::map<std::string,SFrame>&frame_map_ref=frs.frMap;
