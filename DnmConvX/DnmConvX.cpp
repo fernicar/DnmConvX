@@ -1,4 +1,14 @@
+// Minimal viable change test - Attempt 2
 #include "DnmConvX.h"
+#include <filesystem> // For std::filesystem::path
+#include <string>     // For std::string, std::getline, substr, etc.
+#include <vector>     // For std::vector
+#include <sstream>    // For std::istringstream, std::stringstream
+#include <fstream>    // For std::ifstream, std::ofstream
+#include <iostream>   // For std::cout, std::cerr, std::endl
+#include <iomanip>    // For std::setw, std::right
+#include <map>        // For std::map
+#include <algorithm>  // For std::remove_if (if needed for string trimming)
 
 // CDnmConvX constructor: Initializer list is compatible with header changes.
 CDnmConvX::CDnmConvX(void):omhs(*this),mhs(*this),frs(*this),aks(*this)
