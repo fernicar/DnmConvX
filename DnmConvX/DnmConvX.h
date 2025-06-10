@@ -70,6 +70,7 @@ public:
 // 	~CDnmConvX(void);
 	CDnmConvX&operator<<(std::istringstream&iss);
 	operator std::string() const; // Changed to std::string and made const
+	void finalizeData(); // New method for INI-based processing
 	u16 outputToXFile(cstr outPath="");
 	u16 inputDnmFile(cstr inPath);
 	u16 inputIniFile(cstr inPath);
@@ -746,6 +747,17 @@ struct SFrame{ // Changed from typedef struct
 	SAnimationKey ak;									// animation of the frame, Changed anikey to SAnimationKey
 	std::vector<std::string>frIds;						// id of nested frames, Qualified vector, string
 	// Removed SFrame():p(NULL),nested(false),ak(*p){ftm.reset();}
+
+    void update_transform_and_animation_center() {
+        for (std::uint8_t i = 0; i < 3; ++i) {
+            ftm.c[i] += pos[i]; // ftm is STransform, pos is af3
+        }
+        SQuaternion q = {1.0f, 0.0f, 0.0f, 0.0f}; // Ensure SQuaternion can be initialized like this
+        ftm = q.ai16(tpb); // tpb is ai3. STransform::operator=(SQuaternion) and SQuaternion::ai16(ai3) are used.
+        // Assuming SVertex has operator=(const af3&) which it does.
+        ak.c = ftm.c;      // ak is SAnimationKey. SAnimationKey::c is SVertex. STransform::c is af3.
+    }
+
 	SFrame&operator=(const SFrame&f){			// nested should not copy
 		// p=f.p; // Should not copy reference if it's to the same CDnmConvX instance. If frames can be moved between CDnmConvX instances, this needs more thought. For now, assume p_ is set at construction.
 //		nested=f.nested;
@@ -772,80 +784,32 @@ struct SFrame{ // Changed from typedef struct
 		ak.clear();
 		frIds.clear();
 	}
-	operator cstr(){
-		if(name=="")return"{}";					// true if blacklisted frame
-		// animation here
-		for(u08 i_idx=0;i_idx<3;++i_idx) // Renamed i to i_idx
-			ftm.c[i_idx]+=pos[i_idx];					// parent frame center plus self position
-		SQuaternion q_val={1,0,0,0};						// init a conventional oriented quat, Changed quat to SQuaternion, Renamed q to q_val
-		ftm=q_val.ai16(tpb);						// turn, pitch and bank frame's matrix
-		ak.c=ftm.c;								// update new animation center
-		bool of=true;							// false will merge with nested frame
-		if(&p_ != nullptr && p_.mnm&&frIds.size()==1&&mhId=="null"){	// true if merge frames of null mesh, p to p_
-			SVertex vpos; // Changed vertex to SVertex
-			vpos=ftm.c;
-			of=vpos.anyChange();
-			SFrame&f_ref=p_.frs.frMap[frIds[0]]; // Changed frame to SFrame, p to p_, Renamed f to f_ref
-			vpos=f_ref.ftm.c;
-			of=of||vpos.anyChange();
-			using it_vP = std::vector<af3>::iterator; // Qualified vector
-			for(const auto& pos_val : ak.poss){ // Replaced each it_vP
-				SVertex temp_vpos = pos_val; // Assuming af3 can initialize SVertex or direct use if compatible
-				of=of||temp_vpos.anyChange();
-			}
-			if(!of){
-				std::cout<<name<<" will be merged to "
-					<<frIds[0]<<":\t"<<cnt<<std::endl; // Qualified cout, endl
-				std::vector<std::string>&s_vec=f_ref.ak.parents; // Qualified vector, string, Renamed s_val to s_vec
-				s_vec=ak.parents;
-				s_vec.push_back(name);
-			}
-		}
-		std::stringstream ss; // Qualified stringstream
-		ss<<std::fixed<<std::setprecision(6); // Replaced FLOAT_PRECISION
-		if(of)ss<<"Frame "<<name<<"{\n";
-		if(ftm.anyChange()&&of)					// true when new center/rotation
-			ss<<ftm<<std::endl;						// output, Qualified endl
-		if(&p_ != nullptr){									// true when persistent frame collected, p to p_
-			if(of)p_.aks<<ak;					// save current animkey, p to p_
-			SMesh&mh_ref=p_.mhs.mhMap[mhId]; // Renamed mh to mh_ref, p to p_
-			SMesh cmh_val(mh_ref); // Renamed cmh to cmh_val
-			if(mh_ref.name!="null"){				// true when there is mesh
-				if(mh_ref.pcnt&&(*mh_ref.pcnt!=cnt)){	// true when different cnt
-					std::string s_prefix="C~";				// default clone mesh prefix, Qualified string, Renamed s to s_prefix
-					s_prefix+=cmh_val.name;				// concatenate name
-					if(cmh_val.name[1]=='~')cmh_val.name[0]+=1;	// true if cloned before
-					else cmh_val.name=s_prefix;			// else need new name
-					p_.mhs<<cmh_val;				// save clone mesh, p to p_
-					mhId=cmh_val.name;				// output updated clone id instead
-					std::cout<<"different center in Frame: "<<name<<" mesh: "<<cmh_val.name // Qualified cout
-						<<"\nbefore: "<<*mh_ref.pcnt
-						<<"\naffter: "<<cnt<<"\n\n";
-				}
-				p_.mhs.mhMap[mhId].pcnt=&cnt;	// update center before output, p to p_
-			}
-			if(of)if(p_.nstmh)						// true when output nested mesh, p to p_
-				ss<<p_.mhs.mhMap[mhId]<<std::endl; // Qualified endl, p to p_
-			else{
-				p_.omhs<<cmh_val;					// output mesh definition, p to p_
-				ss<<'{'<<mhId<<"}\n";			// output mesh id only
-			}
-		}
-		else ss<<'{'<<mhId<<"}\n";
-		for(const auto& frame_id : frIds)						// iterate each nested frame id, Replaced each it_vs_
-			if(&p_ != nullptr){								// true when output nested frame, p to p_
-				SFrame&f_ref=p_.frs.frMap[frame_id];	// shortcut to current nested frame, Changed frame to SFrame, Renamed f to f_ref, p to p_
-				if(f_ref.name!=""){					// true if not blacklisted
-					af3 cmod={-cnt.x,-cnt.y,-cnt.z};
-					f_ref.ftm=cmod;					// update new center
-					ss<<f_ref<<std::endl; // Qualified endl
-				}
-			}
-			else ss<<'{'<<frame_id<<"}\n";		// last nested frame id
-		if(of)ss<<"}";
-		return ss.str(); // Replaced macro
-		
-	}
+
+    operator std::string() const { // new const version
+        if (name.empty()) return "{}";
+
+        std::string result;
+        result += std::format("Frame {} {{\n", name);
+
+        if (ftm.anyChange()) {
+            result += ftm.operator std::string() + "\n";
+        }
+
+        if (!mhId.empty() && mhId != "null") {
+             result += std::format("{{{{{}}}}}\n", mhId); // Escape braces for format, then for X file
+        }
+
+        for (const auto& child_frId : frIds) {
+            if (!child_frId.empty()) {
+                result += std::format("{{{{{}}}}}\n", child_frId);
+            }
+        }
+
+        result += ak.operator std::string() + "\n";
+
+        result += "}";
+        return result;
+    }
 }; // Removed frame
 using itsMT_ = std::map<std::string,SMaterial>::const_iterator; // Qualified map, string, Changed material to SMaterial
 struct SMapCollMat{ // Changed from typedef struct
@@ -925,26 +889,18 @@ struct SMapCollFrm{ // Changed from typedef struct
 		frMap.erase(it);
 		return*this;
 	}
-    operator std::string() const { // new - simplified const version
-        // The original version of this operator had extensive side effects
-        // (modifying meshes, frames, blacklisting) and complex recursive-like printing.
-        // A const operator std::string() cannot perform these.
-        // This simplified version will just print the names of non-nested, non-empty frames.
-        // The full logic needs refactoring into non-const methods.
+    operator std::string() const {
         std::string result;
-        result += "// Simplified SMapCollFrm::operator std::string() due to original's side effects\n";
+        // The original logic iterated to find main parent frames.
+        // This SMapCollFrm operator will format its top-level, non-nested frames.
+        // SFrame::operator std::string() is now const and formats a single frame
+        // including its direct children's IDs and its own animation key.
         for (const auto& pair_ : frMap) { // frMap is std::map<std::string, SFrame>
             if (!pair_.second.nested && !pair_.second.name.empty()) {
-                // To get the full frame string, we'd call pair_.second.operator std::string().
-                // However, SFrame::operator std::string() itself might call other string operators
-                // and has its own complexities (like p_.aks << ak).
-                // For now, let's just list the frame names to avoid deep recursion issues here.
-                result += std::format("// Frame: {}\n", pair_.second.name);
-                // If SFrame::operator std::string() is confirmed to be safely const and non-problematic:
-                // result += pair_.second.operator std::string() + "\n";
+                result += pair_.second.operator std::string() + "\n";
             }
         }
-        result += "\n";
+        result += "\n"; // Original had an extra endl after the loop
         return result;
     }
 }; // Removed collFrm

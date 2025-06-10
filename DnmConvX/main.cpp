@@ -59,6 +59,12 @@ int main(int argc, char *argv[]){ // Changed signature: i32 to int
 		if(static_cast<int>(lastError) < static_cast<int>(E_ERROR::E_MemoryError)) { // Cast E_ERROR to int for comparison
 			lastError=dcx.inputIniFile(ini_file_path.c_str());
 		}
+
+        // Finalize data after all input files are processed
+        if(static_cast<int>(lastError) < static_cast<int>(E_ERROR::E_MemoryError)) { // Check if previous steps were successful
+            dcx.finalizeData();
+        }
+
 		if(static_cast<int>(lastError) < static_cast<int>(E_ERROR::E_MemoryError)) { // Cast E_ERROR to int for comparison
 			lastError=dcx.outputToXFile();
 		}

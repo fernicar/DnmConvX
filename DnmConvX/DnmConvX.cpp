@@ -25,7 +25,7 @@ CDnmConvX&CDnmConvX::operator<<(std::istringstream&ss){ // Qualified istringstre
 	if(line_buf=="DYNAMODEL"){
 		++onDnm;
 		++line_idx;std::getline(ss,line_buf);					// get DNM version, Qualified getline
-		if(line_buf[7]!='1')return*this;
+		if(line_buf.length() < 8 || line_buf[7]!='1')return*this; // Added length check for safety
 	}else if(line_buf=="SURF")
 		++onSurf;
 	else return*this;							// wrong file
@@ -39,7 +39,7 @@ CDnmConvX&CDnmConvX::operator<<(std::istringstream&ss){ // Qualified istringstre
 	while(++line_idx,std::getline(ss,line_buf)){				// inside mesh, Qualified getline
 		UColor15Bit color15bit;								// store 15bit color, UColor15Bit from header, Renamed cl2 to color15bit
 		UColor24Bit color24bit;								// store 24bit color, UColor24Bit from header, Renamed cl4 to color24bit
-		char first_char_in_line;									// garbage char slot, Renamed t to first_char_in_line
+		char first_char_in_line = 0;									// garbage char slot, Renamed t to first_char_in_line, initialized
 		std::string garbage_str;								// garbage float slot, Qualified string, Renamed g to garbage_str
 		u16 temp_int = 0;								// temp int, Renamed i to temp_int, initialized
 		std::istringstream line_stream(line_buf); // Qualified istringstream, Renamed is to line_stream
@@ -67,9 +67,9 @@ CDnmConvX&CDnmConvX::operator<<(std::istringstream&ss){ // Qualified istringstre
 			line_stream>>first_char_in_line>>color15bit.u;						// assume unsigned 15bit color
 			if(line_stream>>temp_int){							// true when handle 24bit color
 				color24bit.r=color15bit.u;					// get red
-				color24bit.g=static_cast<std::uint8_t>(temp_int); // Cast temp_int to u08(uint8_t)
+				color24bit.g=static_cast<std::uint8_t>(temp_int);
 				line_stream>>temp_int;
-				color24bit.b=static_cast<std::uint8_t>(temp_int); // Cast temp_int to u08(uint8_t)
+				color24bit.b=static_cast<std::uint8_t>(temp_int);
 			}else color24bit=color15bit;
 			break;}
 		case'F':{
@@ -77,17 +77,20 @@ CDnmConvX&CDnmConvX::operator<<(std::istringstream&ss){ // Qualified istringstre
 			break;}
 		case'E':{
 			if(onFace-- == E_flib::YES){						// true if end of face, Qualified E_flib
-				current_mtname=color24bit;						// create unique rgb name
+				current_mtname=color24bit.operator std::string(); // Use string operator for name
 				current_material.d=color24bit;
 				if(isBright-- == E_flib::YES){					// true if emissive light, Qualified E_flib
 					current_material.e=current_material.d;					// update emissive color
 					current_mtname[0]='G';				// glow indicator
-				}else current_material.e=4/255.f;				// reset emissive color
+				}else current_material.e= SColor3Float{4/255.f,4/255.f,4/255.f}; // reset emissive color
 				u32 sz=current_mesh.mlist.mtMap.size();	// memo index
 				if(current_material.name!=current_mtname||sz==0){		// true if different material
 					current_material.name=current_mtname;				// update material
-					current_material.d=color24bit;
+					// current_material.d=color24bit; // d is already set
 					mts<<current_material;					// collect material
+					if (!nstmt) { // If not using nested material definitions, collect for output definition list
+						omts << current_material;
+					}
 					current_mesh.mlist.mtMap[current_mtname]=current_material;
 				}
 				current_mesh.mlist.mtIdx.push_back(current_material.name);	// mat index
@@ -111,7 +114,14 @@ CDnmConvX&CDnmConvX::operator<<(std::istringstream&ss){ // Qualified istringstre
 					mhs<<current_mesh;					// mesh done
 				current_mesh.clear();						// room for the new mesh
 				line_stream>>garbage_str>>garbage_str;						// get name, then ignore extension file
-				current_mesh.name=garbage_str.substr(0,garbage_str.find_last_of('.'));
+				if (!garbage_str.empty()) {
+					size_t dot_pos = garbage_str.find_last_of('.');
+					if (dot_pos != std::string::npos) {
+						current_mesh.name = garbage_str.substr(0, dot_pos);
+					} else {
+						current_mesh.name = garbage_str;
+					}
+				}
 			}
 			break;}
 		case'B':{								// bright face
@@ -123,78 +133,185 @@ CDnmConvX&CDnmConvX::operator<<(std::istringstream&ss){ // Qualified istringstre
 		if(onSrf == E_flib::YES) // Qualified E_flib
 			break;
 	}
-	SFrame current_frame(*this); // SFrame from header, Renamed f to current_frame
-	SAnimationKey& current_anim_key=current_frame.ak; // SAnimationKey from header, Renamed a to current_anim_key
-	while(++line_idx,std::getline(ss,line_buf)){				// inside DNM animation, Qualified getline
-		std::map<std::string,SFrame>&frame_map_ref=frs.frMap;		// shortcut for frame map, Qualified map, string, SFrame, Renamed frMap to frame_map_ref
-		std::istringstream line_stream(line_buf); // Qualified istringstream, Renamed is to line_stream
-		std::string keyword_str;								// temporal string storage, Qualified string, Renamed g to keyword_str
-		line_stream>>keyword_str;									// get next keyword
+	SFrame current_frame(*this);
+	SAnimationKey& current_anim_key=current_frame.ak;
+	while(++line_idx,std::getline(ss,line_buf)){
+		std::map<std::string,SFrame>&frame_map_ref=frs.frMap;
+		std::istringstream line_stream(line_buf);
+		std::string keyword_str;
+		line_stream>>keyword_str;
 		if(keyword_str=="SRF"){
 			++onSrf;
-			line_stream>>current_frname;							// get frame name
-		}else if(keyword_str=="FIL"){						// FIL
+			line_stream>>current_frname;
+            current_frame.name = current_frname.substr(1,current_frname.size()-2);
+            current_anim_key.name = current_frame.name;
+		}else if(keyword_str=="FIL"){
 			line_stream>>keyword_str;
-			current_frame.mhId=keyword_str.substr(0,keyword_str.find_last_of('.'));	// set mesh name
-		}else if(keyword_str=="CLA"){						// CLA
-			line_stream>>current_anim_key.cla;							// type of animation
-		}else if(keyword_str=="STA"){						// STA
+            if (!keyword_str.empty()) {
+                size_t dot_pos = keyword_str.find_last_of('.');
+                if (dot_pos != std::string::npos) {
+                    current_frame.mhId = keyword_str.substr(0, dot_pos);
+                } else {
+                    current_frame.mhId = keyword_str;
+                }
+            }
+		}else if(keyword_str=="CLA"){
+			line_stream>>current_anim_key.cla;
+		}else if(keyword_str=="STA"){
 			line_stream>>current_frame.pos[0]>>current_frame.pos[1]>>current_frame.pos[2];
-			f32 t_threshold=20.f;							// distance treshold, Renamed t_val to t_threshold
-			for(u08 i_idx=0;i_idx<3;++i_idx) // Renamed i to i_idx
+			f32 t_threshold=20.f;
+			for(u08 i_idx=0;i_idx<3;++i_idx)
 				if(current_frame.pos[i_idx]>t_threshold||current_frame.pos[i_idx]<-t_threshold)
-					current_frame.pos[i_idx]=t_threshold;					// limit extreme coords
-			for(u08 i_idx=0;i_idx<3;++i_idx)current_frame.pos[i_idx]*=scale; // Renamed i to i_idx
-			line_stream>>current_frame.tpb[0]>>current_frame.tpb[1]>>current_frame.tpb[2];	// turn, then pitch, then bank
-/*			const float e_factor=0.0054931640625f;		// 360/65536 (deg/16bit), Renamed e to e_factor
-			if(current_frame.tpb[0]||current_frame.tpb[1]||current_frame.tpb[2])
-				std::cout<<"Turn,Pitch,-Bank,frame:"<<std::fixed<<std::setprecision(0) // Qualified cout, fixed, setprecision
-					<<std::setw(4)<<std::right<<current_frame.tpb[0]*e_factor // Qualified setw, right
-					<<std::setw(4)<<std::right<<current_frame.tpb[1]*e_factor // Qualified setw, right
-					<<std::setw(4)<<std::right<<current_frame.tpb[2]*e_factor<<' '<<current_frname<<std::endl; // Qualified setw, right, endl
-*/			current_frame.tpb[2]*=-1;						// inverted bank angle
-			line_stream>>current_frame.disp;							// mesh display at status anim
+					current_frame.pos[i_idx]=t_threshold;
+			for(u08 i_idx=0;i_idx<3;++i_idx)current_frame.pos[i_idx]*=scale;
+			line_stream>>current_frame.tpb[0]>>current_frame.tpb[1]>>current_frame.tpb[2];
+			current_frame.tpb[2]*=-1;
+			line_stream>>current_frame.disp;
 			current_anim_key.poss.push_back(current_frame.pos);
 			current_anim_key.tpbs.push_back(current_frame.tpb);
 			current_anim_key.disps.push_back(current_frame.disp);
-		}else if(keyword_str=="POS"){						// POS
+		}else if(keyword_str=="POS"){
 			line_stream>>current_frame.pos[0]>>current_frame.pos[1]>>current_frame.pos[2];
-			for(u08 i_idx=0;i_idx<3;++i_idx)current_frame.pos[i_idx]*=scale; // Renamed i to i_idx
-			line_stream>>current_frame.tpb[0]>>current_frame.tpb[1]>>current_frame.tpb[2];	// turn, then pitch, then bank
-/*			const float e_factor=0.0054931640625f;		// 360/65536 (deg/16bit), Renamed e to e_factor
-			if(current_frame.tpb[0]||current_frame.tpb[1]||current_frame.tpb[2])
-				std::cout<<"Turn,Pitch,-Bank,frame:"<<std::fixed<<std::setprecision(0) // Qualified cout, fixed, setprecision
-					<<std::setw(4)<<std::right<<current_frame.tpb[0]*e_factor // Qualified setw, right
-					<<std::setw(4)<<std::right<<current_frame.tpb[1]*e_factor // Qualified setw, right
-					<<std::setw(4)<<std::right<<current_frame.tpb[2]*e_factor<<' '<<current_frname<<std::endl; // Qualified setw, right, endl
-*/			current_frame.tpb[2]*=-1;						// inverted bank angle
-			line_stream>>current_frame.disp;							// mesh display at still pos
-		}else if(keyword_str=="CNT"){						// CNT
+			for(u08 i_idx=0;i_idx<3;++i_idx)current_frame.pos[i_idx]*=scale;
+			line_stream>>current_frame.tpb[0]>>current_frame.tpb[1]>>current_frame.tpb[2];
+			current_frame.tpb[2]*=-1;
+			line_stream>>current_frame.disp;
+		}else if(keyword_str=="CNT"){
 			line_stream>>current_frame.cnt.x>>current_frame.cnt.y>>current_frame.cnt.z;
 			current_frame.cnt=current_frame.cnt*scale;
-		}else if(keyword_str=="REL"){						// Unknown keyword
+		}else if(keyword_str=="REL"){
 			line_stream>>keyword_str;
 			if(keyword_str!="DEP")
-				std::cout<<"line:"<<std::right<<std::setw(6)<<line_idx // Qualified cout, right, setw
-				<<"different REL in: "<<current_frname<<std::endl; // Qualified endl
+				std::cout<<"line:"<<std::right<<std::setw(6)<<line_idx
+				<<"different REL in: "<<current_frname<<std::endl;
 		}else if(keyword_str=="CLD"){
 			line_stream>>keyword_str;
-			keyword_str=keyword_str.substr(1,keyword_str.size()-2);			// remove double quot
-			frame_map_ref[keyword_str].nested=true;				// set true on nested child
-			current_frame.frIds.push_back(keyword_str);				// track nested frame
-		}else if(keyword_str=="END"&&onSrf == E_flib::YES){						// End of hierarchy node, Qualified E_flib
+			keyword_str=keyword_str.substr(1,keyword_str.size()-2);
+			frame_map_ref[keyword_str].nested=true;
+			current_frame.frIds.push_back(keyword_str);
+		}else if(keyword_str=="END"&&onSrf == E_flib::YES){
 			--onSrf;
-			f.name=frname.substr(1,frname.size()-2);	// update frame name
-			a.name=f.name;						// update frame name to anim
-			frs<<f;								// store frame
-			f.clear();
+            current_frame.update_transform_and_animation_center();
+
+            bool merged_away = false;
+            if(mnm && current_frame.frIds.size()==1 && current_frame.mhId=="null"){
+                if (frame_map_ref.count(current_frame.frIds[0])) {
+                    SFrame& child_frame = frame_map_ref[current_frame.frIds[0]];
+                    SVertex current_ftm_c_vtx; current_ftm_c_vtx = current_frame.ftm.c;
+                    SVertex child_ftm_c_vtx; child_ftm_c_vtx = child_frame.ftm.c;
+
+                    bool no_pos_change = !current_ftm_c_vtx.anyChange() && !child_ftm_c_vtx.anyChange();
+
+                    for(const auto& anim_pos_af3 : current_frame.ak.poss) {
+                        SVertex anim_vtx; anim_vtx = anim_pos_af3;
+                        if (anim_vtx.anyChange()) { no_pos_change = false; break; }
+                    }
+
+                    if(no_pos_change){
+                        std::cout << current_frame.name << " will be merged to " << current_frame.frIds[0] << ":\t" << current_frame.cnt.operator std::string() << std::endl;
+                        child_frame.ak.parents.insert(child_frame.ak.parents.end(), current_frame.ak.parents.begin(), current_frame.ak.parents.end());
+                        child_frame.ak.parents.push_back(current_frame.name);
+                        merged_away = true;
+                    }
+                }
+            }
+
+            if (!merged_away) {
+                frs << current_frame;
+                SFrame& stored_frame = frs.frMap[current_frame.name];
+
+                aks << stored_frame.ak;
+
+                if (!stored_frame.mhId.empty() && stored_frame.mhId != "null") {
+                    if (mhs.mhMap.count(stored_frame.mhId)) {
+                        SMesh& mh_ref = mhs.mhMap[stored_frame.mhId];
+
+                        if (mh_ref.pcnt && (*mh_ref.pcnt != stored_frame.cnt)) {
+                            SMesh cmh_clone(mh_ref);
+                            std::string s_prefix="C~";
+                            s_prefix+=cmh_clone.name;
+                            if(cmh_clone.name.length() > 1 && cmh_clone.name[1]=='~') cmh_clone.name[0]+=1;
+                            else cmh_clone.name=s_prefix;
+
+                            cmh_clone.pcnt = &stored_frame.cnt;
+                            mhs << cmh_clone;
+                            stored_frame.mhId = cmh_clone.name;
+                        } else {
+                             mh_ref.pcnt = &stored_frame.cnt;
+                        }
+
+                        if (!nstmh) {
+                            omhs << mhs.mhMap[stored_frame.mhId];
+                        }
+                    } else {
+                        std::cerr << "Error: Mesh ID " << stored_frame.mhId << " not found for frame " << stored_frame.name << std::endl;
+                    }
+                }
+            }
+			current_frame.clear();
 		}
 	}
-
 	return*this;
 }
 
-CDnmConvX::operator std::string(){ // Changed return type to std::string directly
+void CDnmConvX::finalizeData() {
+    // Apply face inversions by index
+    for (const auto& inv_idx_str : invfidx) {
+        std::istringstream is(inv_idx_str);
+        std::string mesh_name;
+        std::uint16_t face_idx_to_invert;
+        is >> mesh_name >> face_idx_to_invert;
+        auto mesh_it = mhs.mhMap.find(mesh_name);
+        if (mesh_it != mhs.mhMap.end()) {
+            mesh_it->second.invertFace(face_idx_to_invert);
+        } else {
+            std::cerr << "Warning: Mesh not found for face inversion by index: " << mesh_name << std::endl;
+        }
+    }
+
+    // Apply face inversions by material
+    for (const auto& inv_mat_str : invfmt) {
+        std::istringstream is(inv_mat_str);
+        std::string mesh_name;
+        std::string material_name_to_invert;
+        is >> mesh_name >> material_name_to_invert;
+        auto mesh_it = mhs.mhMap.find(mesh_name);
+        if (mesh_it != mhs.mhMap.end()) {
+            mesh_it->second.invertFace(material_name_to_invert);
+        } else {
+            std::cerr << "Warning: Mesh not found for face inversion by material: " << mesh_name << std::endl;
+        }
+    }
+
+    // Apply mesh blacklist
+    for (const auto& mesh_name_to_blacklist : mhbl) {
+        auto mesh_it = mhs.mhMap.find(mesh_name_to_blacklist);
+        if (mesh_it != mhs.mhMap.end()) {
+            mesh_it->second.clear();
+            omhs.mhMap.erase(mesh_name_to_blacklist);
+        } else {
+            std::cout << "Info: Blacklist Mesh not found (already removed or never existed): " << mesh_name_to_blacklist << std::endl;
+        }
+    }
+
+    // Apply frame blacklist
+    for (const auto& frame_name_to_blacklist : frbl) {
+        auto frame_it = frs.frMap.find(frame_name_to_blacklist);
+        if (frame_it != frs.frMap.end()) {
+            frame_it->second.clear();
+            aks.akMap.erase(frame_name_to_blacklist);
+        } else {
+            std::cout << "Info: Blacklist Frame not found (already removed or never existed): " << frame_name_to_blacklist << std::endl;
+        }
+    }
+
+    if (!dsmh.empty()) {
+        // Logic for dsmh would go here, likely modifying material properties.
+        std::cout << "// FinalizeData: Processing DoubleSideMesh (Actual logic for applying to materials/meshes deferred)" << std::endl;
+    }
+}
+
+std::string CDnmConvX::operator std::string() const { // Make it const
 	std::stringstream ss,ss2,ss3; // Qualified stringstream
 	ss3<<frs;									// update all frames on output
 	ss2<<omhs;									// if any, update all mesh definition
@@ -205,7 +322,7 @@ CDnmConvX::operator std::string(){ // Changed return type to std::string directl
 	ss<<ss2.str();								// output mesh definitions
 	ss<<ss3.str();								// output nested frames
 	ss<<aks;									// output animationkeys
-	return ss.str(); // Changed to return std::string
+	return ss.str();
 }
 u16 CDnmConvX::outputToXFile(cstr outPath){
 	std::string outFilePath(outPath); // Qualified string
