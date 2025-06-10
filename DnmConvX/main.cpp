@@ -62,7 +62,7 @@ int main(int argc, char *argv[]){ // Changed signature: i32 to int
 
         // Finalize data after all input files are processed
         if(static_cast<int>(lastError) < static_cast<int>(E_ERROR::E_MemoryError)) { // Check if previous steps were successful
-            dcx.finalizeData();
+            dcx.finalizeData(); // This line is already present, ensuring it stays.
         }
 
 		if(static_cast<int>(lastError) < static_cast<int>(E_ERROR::E_MemoryError)) { // Cast E_ERROR to int for comparison

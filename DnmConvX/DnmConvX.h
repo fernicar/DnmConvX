@@ -13,6 +13,7 @@
 #include<functional>
 #include<regex>
 #include <format> // Added format include
+#include <span>   // Added span include
 
 using cstr = const char*;
 using c08 = char;
@@ -69,7 +70,7 @@ public:
 	CDnmConvX(void);
 // 	~CDnmConvX(void);
 	CDnmConvX&operator<<(std::istringstream&iss);
-	operator std::string() const; // Changed to std::string and made const
+	[[nodiscard]] operator std::string() const; // Changed to std::string and made const
 	void finalizeData(); // New method for INI-based processing
 	u16 outputToXFile(cstr outPath="");
 	u16 inputDnmFile(cstr inPath);
@@ -103,7 +104,7 @@ struct UColor24Bit{ // Changed from union to struct
 		g=c.g*8+c.g/4;
 		b=c.b*8+c.b/4;
 		return*this;}
-	std::string operator cstr() const { // Ensure it's const
+	[[nodiscard]] std::string operator cstr() const { // Ensure it's const
         return std::format("_{:02x}{:02x}{:02x}_", r, g, b);
 	}
 }; // Removed c24b
@@ -126,7 +127,7 @@ struct SVertex{ // Changed from typedef struct
 		SVertex a={x+v.x,y+v.y,z+v.z,false};
 		return a;
 	}
-	std::string operator cstr() const { // Ensure it's const
+	[[nodiscard]] std::string operator cstr() const { // Ensure it's const
         return std::format("{:.6f};{:.6f};{:.6f};", x, y, z);
 	}
 	f32 dot(const SVertex&v){
@@ -168,7 +169,7 @@ struct SFaceIdx{ // Changed from typedef struct
 		std::vector<u16>r_val(vfi.rbegin(),vfi.rend()); // Qualified vector, renamed r to r_val
 		vfi.swap(r_val);
 	}
-	std::string operator cstr() const { // Ensure it's const
+	[[nodiscard]] std::string operator cstr() const { // Ensure it's const
         if (vfi.empty()) return "";
         std::string s = std::format("{};", vfi.size()); // Removed std::fixed and std::setprecision
         for (std::size_t i = 0; i < vfi.size(); ++i) {
@@ -196,7 +197,7 @@ struct SColor3Float{ // Changed from typedef struct
 		r=g=b=f;
 		return*this;
 	}
-	std::string operator cstr() const { // Ensure it's const
+	[[nodiscard]] std::string operator cstr() const { // Ensure it's const
         return std::format("{:.6f};{:.6f};{:.6f}", r, g, b);
 	}
 }; // Removed cl3f
@@ -208,7 +209,7 @@ struct SMaterial{ // Changed from typedef struct
 	f32 g;							// gloss
 	SColor3Float s;							// specular RGB, Was cl3f
 	SColor3Float e;							// emissive RGB, Was cl3f
-	std::string operator cstr() const { // Ensure it's const
+	[[nodiscard]] std::string operator cstr() const { // Ensure it's const
         return std::format("Material {} {{\n"
                            "{};{:.6f};;\n"
                            "{:.6f};\n"
@@ -224,7 +225,7 @@ struct SMaterialList{ // Changed from typedef struct
 	std::vector<std::string>mtIdx;						// material index per vertex, Qualified vector, string
 	std::map<std::string,SMaterial>mtMap; // Qualified map, string. Changed material to SMaterial
 	// Removed default constructor SMaterialList():p(NULL){}
-	std::string operator std::string() const { // Made const
+	[[nodiscard]] std::string operator std::string() const { // Made const
         std::string result = std::format("MeshMaterialList {{\n"
                                      "{};\n"
                                      "{};\n",
@@ -275,7 +276,7 @@ struct SMeshNormals{ // Changed from typedef struct
 	void invertFace(u16 idx){
 		fcs[idx].reverseContent();
 	}
-	std::string operator cstr() const { // Ensure it's const
+	[[nodiscard]] std::string operator cstr() const { // Ensure it's const
         std::string result = std::format("MeshNormals{{\n{}", vts.size());
         result += ";"; // Terminator for vts.size()
         for (const auto& vertex_val : vts) {
@@ -306,7 +307,7 @@ struct SMesh{ // Changed from typedef struct
 	SMaterialList mlist; // Changed mlist to SMaterialList
 	SVertex* pcnt = nullptr;								// reference to new mesh center, Changed vertex to SVertex, initialized
 	// Removed SMesh():p(NULL),pcnt(NULL),mlist(*p){}
-    std::string operator std::string() const { // Now const
+    [[nodiscard]] std::string operator std::string() const { // Now const
         if (vts.empty()) { // was vts.size() == 0
             return std::format("Mesh {} {{1;0;0;0;;1;3;0,0,0;;}}", name);
         }
@@ -514,7 +515,7 @@ struct SQuaternion{ // Changed from typedef struct
 		(*this)=(b*p)*t;
 		return*this;
 	}
-    operator std::string() const {
+    [[nodiscard]] operator std::string() const {
         return std::format("4;{:.6f},{:.6f},{:.6f},{:.6f};;", w, x, y, z);
     }
 }; // Removed quat
@@ -614,7 +615,7 @@ struct STransform{ // Changed from typedef struct
 		if(!keepCenter)
 			c.assign(0);						// reset center position
 	}
-    operator std::string() const {
+    [[nodiscard]] operator std::string() const {
         return std::format("FrameTransformMatrix{{\n"
                            "{:.6f},{:.6f},{:.6f},0,\n"
                            "{:.6f},{:.6f},{:.6f},0,\n"
@@ -691,7 +692,7 @@ struct SAnimationKey{					// Animation{ // Changed from typedef struct
 //			o=o+mvMap[k];
 		}
 	}
-    operator std::string() const { // Now const
+    [[nodiscard]] operator std::string() const { // Now const
         // REMOVED: calcSelf();
         // REMOVED: loop with calcParent(*it_vs_);
         // These must be called externally if data needs recalculation.
@@ -834,12 +835,13 @@ struct SMapCollMat{ // Changed from typedef struct
 		mtMap.clear(); // Ensure original is empty
 		return*this;
 	}
-	std::string operator cstr(){ // Changed return type
-		std::stringstream ss; // Qualified stringstream
-		for(const auto& pair_ : mtMap) // Replaced each itsMT
-			ss<<pair_.second<<std::endl; // Qualified endl
-		ss<<std::endl; // Qualified endl
-		return ss.str(); // Replaced macro
+	[[nodiscard]] std::string operator std::string() const { // Renamed cstr to std::string
+		std::string result;
+		for (const auto& pair_ : mtMap) {
+			result += pair_.second.operator std::string() + "\n";
+		}
+		result += "\n"; // Corrected: Append newline to result
+		return result;  // Corrected: Return result
 	}
 }; // Removed collMat
 using itsMH = std::map<std::string,SMesh>::iterator; // Qualified map, string, Changed mesh to SMesh
@@ -858,7 +860,7 @@ struct SMapCollMsh{ // Changed from typedef struct
 		mhMap.erase(it);
 		return*this;
 	}
-    operator std::string() const { // new
+    [[nodiscard]] operator std::string() const { // new
         // REMOVED: Blacklist processing logic that modifies mhMap
         std::string result;
         for (const auto& pair_ : mhMap) { // mhMap is std::map<std::string, SMesh>
@@ -889,7 +891,7 @@ struct SMapCollFrm{ // Changed from typedef struct
 		frMap.erase(it);
 		return*this;
 	}
-    operator std::string() const {
+    [[nodiscard]] operator std::string() const {
         std::string result;
         // The original logic iterated to find main parent frames.
         // This SMapCollFrm operator will format its top-level, non-nested frames.
@@ -914,7 +916,7 @@ struct SMapCollAnim{ // Changed from typedef struct
 		akMap[ak.name]=ak;
 		return*this;
 	}
-    operator std::string() const { // new
+    [[nodiscard]] operator std::string() const { // new
         std::string result = "AnimationSet{\n";
         for (const auto& pair_ : akMap) { // akMap is std::map<std::string, SAnimationKey>
             if (!pair_.second.name.empty()) { // was itsA->second.name!=""
