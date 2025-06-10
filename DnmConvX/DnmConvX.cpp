@@ -255,6 +255,14 @@ CDnmConvX&CDnmConvX::operator<<(std::istringstream&ss){ // Qualified istringstre
 }
 
 void CDnmConvX::finalizeData() {
+    // First, process normals for all loaded meshes
+    for (auto& pair_ : mhs.mhMap) {
+        SMesh& mesh = pair_.second;
+        if (!mesh.name.empty() && !mesh.vts.empty()) {
+            mesh.checkNormal(mesh.name);
+        }
+    }
+
     // Apply face inversions by index
     for (const auto& inv_idx_str : invfidx) {
         std::istringstream is(inv_idx_str);

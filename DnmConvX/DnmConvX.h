@@ -343,22 +343,53 @@ struct SMesh{ // Changed from typedef struct
         result += normal.operator std::string() + "\n}";
         return result;
     }
-	void checkNormal(const std::string&name){ // Qualified string
-		if(vts.size()==normal.vts.size())return;
-		SVertex v_init={0,0,0,false};					// initializer vertex, Changed vertex to SVertex, renamed v to v_init
-		std::vector<SVertex>n_vec(vts.size(),v_init);			// random access of normal vertex, Qualified vector, Changed vertex to SVertex, Renamed n to n_vec
-		auto normal_vts_it = normal.vts.begin(); // Changed itvV it to auto normal_vts_it
-		for(const auto& face_val : fcs){						// iterate each 144 faces, Replaced each itvFI
-			for(const auto& v_idx : face_val.vfi)				// and each 4 or 3 vertex in face, Replaced each it_vu_
-				n_vec[v_idx]+=(*normal_vts_it);				// sum normal vertex to n[vertIdx]
-			++normal_vts_it;								// next normal vertex
-		}
-		u16 idx=-1;
-		for(auto& vertex_val : n_vec)							// after sum all normals, Replaced each itvV
-			vertex_val.normalize(name,++idx);		// normalize each
-		normal.vts.swap(n_vec);						// save the normalized group
-		return;
-	}
+	void checkNormal(const std::string& mesh_name) {
+    if (vts.empty() || fcs.empty()) {
+        // No vertices or faces, nothing to calculate.
+        return;
+    }
+
+    // Assumption: normal.vts (input) contains one SVertex normal per face defined in fcs.
+    if (normal.vts.size() != fcs.size()) {
+        std::cerr << "Warning in SMesh::checkNormal for mesh '" << mesh_name
+                  << "': Number of faces (" << fcs.size()
+                  << ") does not match number of initial face normals provided (" << normal.vts.size()
+                  << "). Cannot reliably calculate vertex normals." << std::endl;
+        return;
+    }
+
+    SVertex zero_vertex;
+    zero_vertex.x = 0.0f;
+    zero_vertex.y = 0.0f;
+    zero_vertex.z = 0.0f;
+    zero_vertex.r = false;
+
+    std::vector<SVertex> calculated_vertex_normals(vts.size(), zero_vertex);
+
+    auto face_normal_it = normal.vts.cbegin();
+    for (const auto& face : fcs) {
+        const SVertex& current_face_normal = *face_normal_it;
+        for (std::uint16_t vertex_index : face.vfi) {
+            if (vertex_index < calculated_vertex_normals.size()) {
+                calculated_vertex_normals[vertex_index] += current_face_normal;
+            } else {
+                std::cerr << "Warning in SMesh::checkNormal for mesh '" << mesh_name
+                          << "': Vertex index " << vertex_index << " out of bounds for "
+                          << calculated_vertex_normals.size() << " vertices." << std::endl;
+            }
+        }
+        if (face_normal_it != normal.vts.cend()) { // Check before incrementing
+             ++face_normal_it;
+        }
+    }
+
+    std::uint16_t current_idx = 0;
+    for (auto& vert_norm : calculated_vertex_normals) {
+        vert_norm.normalize(mesh_name, current_idx++);
+    }
+
+    normal.vts.swap(calculated_vertex_normals);
+}
 	std::vector<u16>listFaceIdx(const std::string&mt){ // Qualified vector, string
 		std::vector<u16>r_vec; // Qualified vector, Renamed r to r_vec
 		u16 i_idx=0;								// count faces index, Renamed i to i_idx
