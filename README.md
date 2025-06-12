@@ -150,9 +150,9 @@ This diagram outlines how DnmConvX processes `.ini` configuration files to custo
 
 ```mermaid
 graph TD
-    A[Start INI Processing] --> B{Locate INI (Executable Path)};
+    A[Start INI Processing] --> B{"Locate INI (Executable Path)"};
     B -- Found --> C[Parse INI File 1];
-    B -- Not Found --> D{Locate INI (DNM Path)};
+    B -- Not Found --> D{"Locate INI (DNM Path)"};
     C --> D;
     D -- Found --> E[Parse INI File 2, Merge/Override Config];
     D -- Not Found --> F[Use Default Config];
@@ -186,7 +186,7 @@ graph TD
     B --> C[Input DNM File];
     C -- Success --> D[Parse DNM Data];
     C -- Failure --> X[Error: DNM Read];
-    D --> E[Input INI File(s)];
+    D --> E["Input INI File(s)"];
     E -- Optional --> F[Parse INI Data & Apply Configs];
     F --> G[Finalize Data Processing];
     G --> H[Apply Blacklists];
